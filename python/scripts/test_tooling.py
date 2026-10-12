@@ -123,6 +123,52 @@ def test_batch_matches_creation_and_methods():
     assert batch_matches[0].keys.tolist() == [1, 2]
     assert batch_matches[0].distances.tolist() == [0.5, 0.6]
     assert batch_matches.to_list() == [(1, 0.5), (2, 0.6), (3, 0.7), (4, 0.8)]
+    assert batch_matches.count_matches(np.array([1, 4])) == 2
+    assert batch_matches.count_matches(np.array([1, 4]), count=1) == 1
+    assert batch_matches.mean_recall(np.array([1, 4])) == 1
+
+
+@pytest.mark.parametrize(
+    "count, expected_matches", [(None, 2), (0, 0), (1, 1), (2, 2), (3, 2), (5, 2), (-1, 2), (-2, 1)]
+)
+def test_batch_matches_recall_ignores_padding(count, expected_matches):
+    matches = BatchMatches(
+        keys=np.array([[0, 99, 99], [7, 0, 0], [99, 0, 0], [5, 0, 99]], dtype=np.uint64),
+        distances=np.zeros((4, 3), dtype=np.float32),
+        counts=np.array([1, 1, 0, 2]),
+    )
+    expected = np.zeros(4, dtype=np.uint64)
+    assert matches.count_matches(expected, count=count) == expected_matches
+    assert matches.mean_recall(expected, count=count) == expected_matches / len(expected)
+
+    # Padding values are never matches, regardless of their key.
+    padding = np.array([99, 0, 99, 99], dtype=np.uint64)
+    assert matches.count_matches(padding, count=count) == 0
+
+
+@pytest.mark.parametrize("count", [None, 0, 1, 3])
+def test_batch_matches_recall_without_columns(count):
+    matches = BatchMatches(
+        keys=np.empty((2, 0), dtype=np.uint64),
+        distances=np.empty((2, 0), dtype=np.float32),
+        counts=np.zeros(2, dtype=np.uint64),
+    )
+    expected = np.zeros(2, dtype=np.uint64)
+    assert matches.count_matches(expected, count=count) == 0
+    assert matches.mean_recall(expected, count=count) == 0
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_index_search_recall_ignores_padding(exact):
+    index = Index(ndim=2, metric="l2sq", dtype="f32")
+    vectors = np.array([[1, 2], [3, 4]], dtype=np.float32)
+    index.add(42, vectors[0])
+    matches = index.search(vectors, count=3, exact=exact, threads=1)
+
+    np.testing.assert_array_equal(matches.counts, [1, 1])
+    assert matches.count_matches(np.array([0, 0], dtype=np.uint64)) == 0
+    assert matches.mean_recall(np.array([0, 0], dtype=np.uint64)) == 0
+    assert matches.mean_recall(np.array([42, 42], dtype=np.uint64)) == 1
 
 
 def test_multi_index():
